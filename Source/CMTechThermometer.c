@@ -99,8 +99,8 @@
 
 
 // 两种模式：开机模式和待机模式
-#define MODE_ACTIVE         0             // 开机模式
-#define MODE_STANDBY        1             // 待机模式
+#define MODE_ACTIVE         0             // 表示开机模式
+#define MODE_STANDBY        1             // 表示待机模式
 
 
 // 显示上次最大温度值的持续时间，默认3秒
@@ -114,7 +114,6 @@
 
 /* Ative delay: 125 cycles ~1 msec */
 #define ST_HAL_DELAY(n) st( { volatile uint32 i; for (i=0; i<(n); i++) { }; } )
-
 
 
 /*********************************************************************
