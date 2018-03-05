@@ -8,6 +8,7 @@
 *.elf
 *.r51
 *.pbi
+*.pbd
 
 # Linker output
 *.ilk
@@ -17,6 +18,7 @@
 # Precompiled Headers
 *.gch
 *.pch
+*.dep
 
 # Libraries
 *.lib
