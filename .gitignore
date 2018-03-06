@@ -6,6 +6,9 @@
 *.ko
 *.obj
 *.elf
+*.r51
+*.pbd
+*.pbi
 
 # Linker output
 *.ilk
@@ -15,6 +18,7 @@
 # Precompiled Headers
 *.gch
 *.pch
+*.dep
 
 # Libraries
 *.lib
@@ -35,6 +39,7 @@
 *.i*86
 *.x86_64
 *.hex
+*.d51
 
 # Debug files
 *.dSYM/
@@ -49,4 +54,11 @@
 modules.order
 Module.symvers
 Mkfile.old
+dkms.conf
+.DS_Store
+
+*/.DS_Store
+
+*/settings/
+
 dkms.conf
