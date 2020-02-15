@@ -745,7 +745,7 @@ static void readAndProcessThermoData()
   }
 
   // 如果是温度数据，去处理它
-  if(Thermo_GetValueType() == THERMOMETER_CONF_VALUETYPE_T)
+  if(Thermo_GetValueType() == THERMOMETER_VALUETYPE_T)
   {
     DP_Process(value);
   }

@@ -8,11 +8,10 @@
 
 #include "comdef.h"
 
-// Three types of the measure output
-#define THERMOMETER_CONF_VALUETYPE_AD    0x01    //AD value
-#define THERMOMETER_CONF_VALUETYPE_R     0x02    //Resistor value
-#define THERMOMETER_CONF_VALUETYPE_T     0x03    //Temperature value
-
+// Three types of the measurement output value
+#define THERMOMETER_VALUETYPE_AD    0x01    //AD value
+#define THERMOMETER_VALUETYPE_R     0x02    //Resistor value
+#define THERMOMETER_VALUETYPE_T     0x03    //Temperature value
 
 #define T_LOWLIMIT    3390    // low limit of the Temperature value
 #define T_UPLIMIT     4410    // up limit of the Temperature value
