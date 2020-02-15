@@ -1,4 +1,7 @@
-
+/**
+ * ADS1100 header file
+ * ADS1100 is an ADC with 16 bit precision
+*/
 
 #ifndef DEV_ADS1100_H
 #define DEV_ADS1100_H
@@ -7,21 +10,18 @@
 #include <iocc2541.h>
 
 
-// 打开ADS1100电源
+// turn on the ADS1100
 extern void ADS1100_TurnOn();
 
-// 关闭ADS1100电源
+// trun off the ADS1100
 extern void ADS1100_TurnOff();
 
-// 初始化
+// initialize the ADS1100
 extern void ADS1100_Init();
 
-// 获取AD转换值
-// 返回SUCCESS或者FAILURE
+// get one ADC output value
+// return SUCCESS or FAILURE
 extern uint8 ADS1100_GetADValue(uint16 * pData);
-
-
-
 
 
 #endif

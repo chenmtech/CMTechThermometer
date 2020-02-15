@@ -1,5 +1,6 @@
 /*
- * 这个模块用来实现体温计的应用功能
+ * The thermometer application model header file
+ * This model is used to mainly execute measuring the thermometer
 */
 
 #ifndef APP_THERMOMETER_H
@@ -7,20 +8,20 @@
 
 #include "comdef.h"
 
-// 采集的三种数据类型
-#define THERMOMETER_CONF_VALUETYPE_AD    0x01    //设置数据类型为AD值
-#define THERMOMETER_CONF_VALUETYPE_R     0x02    //设置数据类型为电阻值
-#define THERMOMETER_CONF_VALUETYPE_T     0x03    //设置数据类型为温度值
+// Three types of the measure output
+#define THERMOMETER_CONF_VALUETYPE_AD    0x01    //AD value
+#define THERMOMETER_CONF_VALUETYPE_R     0x02    //Resistor value
+#define THERMOMETER_CONF_VALUETYPE_T     0x03    //Temperature value
 
 
-#define T_LOWLIMIT    3390    // 温度值下限
-#define T_UPLIMIT     4410    // 温度值上限
+#define T_LOWLIMIT    3390    // low limit of the Temperature value
+#define T_UPLIMIT     4410    // up limit of the Temperature value
 
-#define R_LOWLIMIT    22332    // 电阻值下限
-#define R_UPLIMIT     33528    // 电阻值上限
+#define R_LOWLIMIT    22332    // low limit of the Resistor value
+#define R_UPLIMIT     33528    // up limit of the Resistor value
 
-#define AD_LOWLIMIT   0        // AD下限
-#define AD_UPLIMIT    32768    // AD上限
+#define AD_LOWLIMIT   0        // low limit of the AD value
+#define AD_UPLIMIT    32768    // up limit of the AD value
 
 
 // 初始化

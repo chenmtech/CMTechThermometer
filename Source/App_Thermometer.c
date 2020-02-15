@@ -1,18 +1,14 @@
 
 #include "Dev_ADS1100.h"
-
 #include "bcomdef.h"
-
 #include "osal_snv.h"
-
 #include "Dev_HT1621B.h"
-
 #include "App_Thermometer.h"
 
 // NVID
-#define BLE_NVID_CALI_VALUE                     0x80      // 标定值在NV中的ID
-#define BLE_NVID_VALUE_TYPE                     0x81      // 上次采集数据类型在NV中的ID，1：AD值，2：电阻值，3：温度值
-#define BLE_NVID_MAX_VALUE                      0x82      // 上次采集的最大值在NV中的ID
+#define BLE_NVID_CALI_VALUE 0x80      // 标定值在NV中的ID
+#define BLE_NVID_VALUE_TYPE 0x81      // 上次采集数据类型在NV中的ID，1：AD值，2：电阻值，3：温度值
+#define BLE_NVID_MAX_VALUE  0x82      // 上次采集的最大值在NV中的ID
 
 
 //////////////////下面为华巨NTC小黑头的参数
