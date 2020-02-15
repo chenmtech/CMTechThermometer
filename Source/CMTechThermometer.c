@@ -66,7 +66,6 @@
 #endif
 
 #include "gapbondmgr.h"
-
 #include "App_GAPConfig.h"
 
 #include "App_GATTConfig.h"
@@ -98,43 +97,17 @@
 #endif
 
 
-// 两种模式：开机模式和待机模式
-#define MODE_ACTIVE         0             // 表示开机模式
-#define MODE_STANDBY        1             // 表示待机模式
-
-
-// 显示上次最大温度值的持续时间，默认3秒
-#define THERMO_LASTMAXTEMP_SHOWTIME           3000
-
-// 显示预测温度值的持续时间，20秒
-#define THERMO_SHOW_PRETEMP                   20000
-
-// 默认的传输周期，每1个数据传输一个
-#define DEFAULT_TRANSMIT_PERIOD         1
+// two modes
+#define MODE_ACTIVE         0             // active mode
+#define MODE_STANDBY        1             // standby mode
+#define THERMO_SHOWLASTMAXTEMP_TIME           3000 // the time that showing the last max temp, unit: second
+#define THERMO_SHOWPRETEMP_TIME               20000 // the time that showing the predicted temp
+#define DEFAULT_TRANSMIT_PERIOD         1 // 默认的传输周期，每1个数据传输一个
 
 /* Ative delay: 125 cycles ~1 msec */
 #define ST_HAL_DELAY(n) st( { volatile uint32 i; for (i=0; i<(n); i++) { }; } )
 
 
-/*********************************************************************
- * TYPEDEFS
- */
-
-/*********************************************************************
- * GLOBAL VARIABLES
- */
-
-/*********************************************************************
- * EXTERNAL VARIABLES
- */
-
-/*********************************************************************
- * EXTERNAL FUNCTIONS
- */
-
-/*********************************************************************
- * LOCAL VARIABLES
- */
 static uint8 CMTechThermometer_TaskID;   // Task ID for internal task/event processing
 
 static gaprole_States_t gapProfileState = GAPROLE_INIT;

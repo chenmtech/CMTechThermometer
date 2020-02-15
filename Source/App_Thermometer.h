@@ -1,6 +1,6 @@
 /*
  * The thermometer application model header file
- * This model is used to mainly execute measuring the thermometer
+ * This model is used to mainly realize all the functions related to measure the thermometer
 */
 
 #ifndef APP_THERMOMETER_H
@@ -9,40 +9,40 @@
 #include "comdef.h"
 
 // Three types of the measurement output value
-#define THERMOMETER_VALUETYPE_AD    0x01    //AD value
-#define THERMOMETER_VALUETYPE_R     0x02    //Resistor value
-#define THERMOMETER_VALUETYPE_T     0x03    //Temperature value
+#define THERMOMETER_CFG_VALUETYPE_AD    0x01    //AD value
+#define THERMOMETER_CFG_VALUETYPE_R     0x02    //Resistor value
+#define THERMOMETER_CFG_VALUETYPE_T     0x03    //Temperature value
 
-#define T_LOWLIMIT    3390    // low limit of the Temperature value
-#define T_UPLIMIT     4410    // up limit of the Temperature value
+#define LOWLIMIT_T    3390    // low limit of the Temperature value
+#define UPLIMIT_T     4410    // up limit of the Temperature value
 
-#define R_LOWLIMIT    22332    // low limit of the Resistor value
-#define R_UPLIMIT     33528    // up limit of the Resistor value
+#define LOWLIMIT_R    22332    // low limit of the Resistor value
+#define UPLIMIT_R     33528    // up limit of the Resistor value
 
-#define AD_LOWLIMIT   0        // low limit of the AD value
-#define AD_UPLIMIT    32768    // up limit of the AD value
+#define LOWLIMIT_AD   0        // low limit of the AD value
+#define UPLIMIT_AD    32768    // up limit of the AD value
 
 
-// 初始化
+// initialize the model
 extern void Thermo_Init();
 
-// 关硬件
+// turn off the hardware, including the LCD and ADC
 extern void Thermo_HardwareOff();
 
-// 开硬件
+// turn on the hardware, including the LCD and ADC
 extern void Thermo_HardwareOn();
 
-// 获取数据
-extern uint16 Thermo_GetValue();
-
-// 进行标定
-extern void Thermo_DoCalibration();
-
-// 获取数据类型
+// get value type
 extern uint8 Thermo_GetValueType();
 
-// 设置数据类型
+// set value type
 extern void Thermo_SetValueType(uint8 type);
+
+// get value which can be AD, R or T value according to the value type
+extern uint16 Thermo_GetValue();
+
+// do calibration for a new device in order to get its caliValue
+extern void Thermo_DoCalibration();
 
 // 更新当前最大值
 extern uint16 Thermo_UpdateMaxValue(uint16 value);
@@ -72,7 +72,7 @@ extern void Thermo_ToneOff();
 extern void Thermo_SetPreTemp(uint16 temp);
 
 // 设置是否显示预测温度值
-extern void Thermo_SetShowPreTemp(bool isShow);
+extern void Thermo_isShowPreTemp(bool show);
 
 
 #endif

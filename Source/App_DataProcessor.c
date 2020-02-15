@@ -10,7 +10,7 @@
 
 
 // 触发开始有效测量的温度值：温度值只有大于等于此温度，才算开始有效测量
-#define START_TEMP   3400
+#define START_TEMP   3300
 
 // 测量稳定的判定阈值：一分钟之间的温度变化阈值
 #define DELTA_TEMP    3    // 0.03摄氏度
@@ -200,7 +200,7 @@ extern void DP_Process(uint16 data)
 extern uint16 getPrecastTemp()
 {
   // 用线性模型预测温度值
-  return A30*(buf[30]-buf[20])+A40*(buf[40]-buf[30])+A50*(buf[50]-buf[40])+buf[50];
+  return (uint16)(A30*(buf[30]-buf[20])+A40*(buf[40]-buf[30])+A50*(buf[50]-buf[40])+buf[50]);
 }
 
 

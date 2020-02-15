@@ -66,13 +66,13 @@ extern "C"
 #define TH_STOP_SHOW_PRETEMP_EVT              0x0100     // 停止显示预测温度值
 
 // 测量控制标记值
-#define THERMOMETER_CONF_STANDBY            0x00    //停止体温测量，进入待机模式
+#define THERMOMETER_CFG_STANDBY            0x00    //停止体温测量，进入待机模式
 /////////////////////////////////////////////////////////////////////////////////////
-// 0x01,0x02,0x03分别表示采集的三种数据类型，在App_Thermometer.h中定义
+// 0x01,0x02,0x03分别表示采集三种数据类型，在App_Thermometer.h中定义
 /////////////////////////////////////////////////////////////////////////////////////  
-#define THERMOMETER_CONF_CALIBRATION        0x04    // 进行标定  
-#define THERMOMETER_CONF_LCDON              0x05    // 开LCD
-#define THERMOMETER_CONF_LCDOFF             0x06    // 关LCD
+#define THERMOMETER_CFG_CALIBRATION        0x04    // 进行标定  
+#define THERMOMETER_CFG_LCDON              0x05    // 开LCD
+#define THERMOMETER_CFG_LCDOFF             0x06    // 关LCD
 
 /*********************************************************************
  * MACROS
