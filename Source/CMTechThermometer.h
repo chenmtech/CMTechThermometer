@@ -93,7 +93,6 @@ extern void CMTechThermometer_Init( uint8 task_id );
 extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events );
 
 
-
 /*********************************************************************
 *********************************************************************/
 
