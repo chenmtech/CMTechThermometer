@@ -6365,24 +6365,6 @@
   <group>
     <name>APP</name>
     <file>
-      <name>$PROJ_DIR$\..\Source\App_DataProcessor.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\App_DataProcessor.h</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\App_GAPConfig.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\App_GAPConfig.h</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\App_GATTConfig.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\App_GATTConfig.h</name>
-    </file>
-    <file>
       <name>$PROJ_DIR$\..\Source\App_Thermometer.c</name>
     </file>
     <file>

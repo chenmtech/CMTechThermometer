@@ -49,11 +49,8 @@
 #include "OnBoard.h"
 //#include "hal_adc.h"
 #include "hal_key.h"
-
 #include "gatt.h"
-
 #include "hci.h"
-
 #include "gapgattserver.h"
 #include "gattservapp.h"
 #include "devinfoservice.h"
@@ -66,12 +63,8 @@
 #endif
 
 #include "gapbondmgr.h"
-#include "App_GAPConfig.h"
-
-#include "App_GATTConfig.h"
-
 #include "App_Thermometer.h"
-
+//#include "App_DataProcessor.h"
 #include "CMTechThermometer.h"
 
 #if defined FEATURE_OAD
@@ -79,163 +72,157 @@
   #include "oad_target.h"
 #endif
 
-#include "App_DataProcessor.h"
-
-/*********************************************************************
- * MACROS
- */
-
-/*********************************************************************
- * CONSTANTS
- */
-
-
 #define INVALID_CONNHANDLE                    0xFFFF
 
 #if defined ( PLUS_BROADCASTER )
   #define ADV_IN_CONN_WAIT                    500 // delay 500 ms
 #endif
 
-
 // two modes
 #define MODE_ACTIVE         0             // active mode
 #define MODE_STANDBY        1             // standby mode
 #define THERMO_SHOWLASTMAXTEMP_TIME           3000 // the time that showing the last max temp, unit: second
 #define THERMO_SHOWPRETEMP_TIME               20000 // the time that showing the predicted temp
-#define DEFAULT_TRANSMIT_PERIOD         1 // 默认的传输周期，每1个数据传输一个
 
 /* Ative delay: 125 cycles ~1 msec */
 #define ST_HAL_DELAY(n) st( { volatile uint32 i; for (i=0; i<(n); i++) { }; } )
 
 
-static uint8 CMTechThermometer_TaskID;   // Task ID for internal task/event processing
+static uint8 curMode = MODE_STANDBY; // current mode
+static bool ADCEnabled = FALSE; // is the ADC enabled
+static uint16 thermoInterval = 1; // temperature measurement interval, uint: second
 
-static gaprole_States_t gapProfileState = GAPROLE_INIT;
+// advertise data
+static uint8 advertData[] = 
+{ 
+  0x02,   // length of this data
+  GAP_ADTYPE_FLAGS,
+  GAP_ADTYPE_FLAGS_GENERAL | GAP_ADTYPE_FLAGS_BREDR_NOT_SUPPORTED,
 
+  // service UUID
+  0x03,   // length of this data
+  GAP_ADTYPE_16BIT_MORE,
+  LO_UINT16( THERMOMETER_SERV_UUID ),
+  HI_UINT16( THERMOMETER_SERV_UUID ),
 
-// 当前工作模式，初始化为待机模式
-static uint8 curMode = MODE_STANDBY;
+};
 
-// 是否开始AD采集，初始化为停止采集
-static bool thermoADEnabled = FALSE;
+// scan response data
+static uint8 scanResponseData[] =
+{
+  0x06,   // length of this data
+  GAP_ADTYPE_LOCAL_NAME_SHORT,   
+  'C',
+  'M',
+  '_',
+  'T',
+  'M'
+};
 
-// 数据采集周期，固定为传输的计时单位1秒
-static uint16 ADPeriod = THERMOMETER_TIME_UNIT;
+// GGS device name
+static uint8 attDeviceName[GAP_DEVICE_NAME_LEN] = "CM Thermometer";
 
-// 蓝牙数据传输周期，用ADPeriod的倍数来表示，默认为1倍
-static uint8 transNumOfADPeriod = DEFAULT_TRANSMIT_PERIOD;
+static uint8 taskID;   // Task ID for internal task/event processing
+static gaprole_States_t gapRoleState = GAPROLE_INIT;
 
-// 用于记录采样次数，是否需要通过蓝牙发送数据
-static uint8 haveSendNum = 0;
-
-// 蜂鸣器响声次数
-static uint8 bzTimes = 0;
-
-
-
-/*********************************************************************
- * LOCAL FUNCTIONS
- */
-static void CMTechThermometer_ProcessOSALMsg( osal_event_hdr_t *pMsg );
-
-static void CMTechThermometer_HandleKeys( uint8 shift, uint8 keys );
-
-static void peripheralStateNotificationCB( gaprole_States_t newState );
-
-static void thermometerServiceCB( uint8 paramID );
-
-// 初始化为待机模式
-static void initAsStandbyMode();
-
-// 从待机模式转换到开机模式
-static void switchFromStandbyToActive( void );
-
-// 从开机模式转换到待机模式
-static void switchFromActiveToStandby( void );
-
-// 读取并处理数据
-static void readAndProcessThermoData();
-
-// 初始化IO管脚
-static void initIOPin();
-
-// 让蜂鸣器响指定次数
-static void turnOnTone(uint8 times);
-
-
-/*********************************************************************
- * PROFILE CALLBACKS
- */
+static void processOSALMsg( osal_event_hdr_t *pMsg );
+static void handleKeys( uint8 shift, uint8 keys );
+static void gapRoleStateCB( gaprole_States_t newState );
+static void thermoServCB( uint8 event );
 
 // GAP Role Callbacks
-static gapRolesCBs_t CMTechThermometer_PeripheralCBs =
+static gapRolesCBs_t gapRoleStateCBs =
 {
-  peripheralStateNotificationCB,  // Profile State Change Callbacks
-  NULL                            // When a valid RSSI is read from controller (not used by application)
+  gapRoleStateCB,  // Profile State Change Callbacks
+  NULL             // When a valid RSSI is read from controller (not used by application)
 };
 
 // GAP Bond Manager Callbacks
-static gapBondCBs_t CMTechThermometer_BondMgrCBs =
+static gapBondCBs_t bondMgrCBs =
 {
   NULL,                     // Passcode callback (not used by application)
   NULL                      // Pairing / Bonding state Callback (not used by application)
 };
 
-static thermometerServiceCBs_t CMTechThermometer_ServCBs =
+static thermometerServiceCBs_t thermoServCBs =
 {
-  thermometerServiceCB    // Charactersitic value change callback
+  thermoServCB    // Charactersitic value change callback
 };
 
+static void initIntoStandbyMode(); // initialize into the standby mode
+static void switchFromStandbyToActive( void ); // switch from standby mode to active mode
+static void switchFromActiveToStandby( void );// switch from active mode to standby mode
+static void readAndProcessThermoData(); // read and process thermo-related data
+static void initIOPin(); // initialize the I/O pins
 
-/*********************************************************************
- * PUBLIC FUNCTIONS
- */
 
-/*********************************************************************
- * @fn      SimpleBLEPeripheral_Init
- *
- * @brief   Initialization function for the Simple BLE Peripheral App Task.
- *          This is called during initialization and should contain
- *          any application specific initialization (ie. hardware
- *          initialization/setup, table initialization, power up
- *          notificaiton ... ).
- *
- * @param   task_id - the ID assigned by OSAL.  This ID should be
- *                    used to send messages and set timers.
- *
- * @return  none
- */
-void CMTechThermometer_Init( uint8 task_id )
+extern void CMTechThermometer_Init( uint8 task_id )
 {
-  CMTechThermometer_TaskID = task_id;
+  taskID = task_id;
+  
+  // Setup the GAP Peripheral Role Profile
+  {
+    // set the advertising data and scan response data
+    GAPRole_SetParameter( GAPROLE_ADVERT_DATA, sizeof( advertData ), advertData );
+    GAPRole_SetParameter( GAPROLE_SCAN_RSP_DATA, sizeof ( scanResponseData ), scanResponseData );
+    
+    // set the advertising parameters
+    GAP_SetParamValue( TGAP_GEN_DISC_ADV_INT_MIN, 1600 ); // units of 0.625ms
+    GAP_SetParamValue( TGAP_GEN_DISC_ADV_INT_MAX, 1600 ); // units of 0.625ms
+    GAP_SetParamValue( TGAP_GEN_DISC_ADV_MIN, 0 ); // advertising forever
+    
+    // disable advertising
+    uint8 advertising = FALSE;
+    GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );
+    
+    // set the pause time from the connection and the update of the connection parameters
+    // during the time, client can finish the tasks e.g. service discovery 
+    // the unit of time is second
+    GAP_SetParamValue( TGAP_CONN_PAUSE_PERIPHERAL, 2 ); 
+    
+    // set the connection parameter
+    uint16 desired_min_interval = 200;  // units of 1.25ms 
+    uint16 desired_max_interval = 1600; // units of 1.25ms
+    uint16 desired_slave_latency = 1;
+    uint16 desired_conn_timeout = 1000; // units of 10ms
+    GAPRole_SetParameter( GAPROLE_MIN_CONN_INTERVAL, sizeof( uint16 ), &desired_min_interval );
+    GAPRole_SetParameter( GAPROLE_MAX_CONN_INTERVAL, sizeof( uint16 ), &desired_max_interval );
+    GAPRole_SetParameter( GAPROLE_SLAVE_LATENCY, sizeof( uint16 ), &desired_slave_latency );
+    GAPRole_SetParameter( GAPROLE_TIMEOUT_MULTIPLIER, sizeof( uint16 ), &desired_conn_timeout );
+    uint8 enable_update_request = TRUE;
+    GAPRole_SetParameter( GAPROLE_PARAM_UPDATE_ENABLE, sizeof( uint8 ), &enable_update_request );
+  }
+  
+  // set GGS device name
+  GGS_SetParameter( GGS_DEVICE_NAME_ATT, GAP_DEVICE_NAME_LEN, attDeviceName );
 
-  // GAP 配置
-  //配置广播参数
-  GAPConfig_SetAdvParam(800, THERMOMETER_SERV_UUID);
-  // 初始化不广播
-  GAPConfig_EnableAdv(FALSE);
-
-  //配置连接参数
-  GAPConfig_SetConnParam(200, 200, 5, 10000, 1);
-
-  //配置GGS，设置设备名
-  GAPConfig_SetGGSParam("Thermometer");
-
-  //配置绑定参数
-  GAPConfig_SetBondingParam(0, GAPBOND_PAIRING_MODE_WAIT_FOR_REQ);
+  // Setup the GAP Bond Manager
+  {
+    uint32 passkey = 0; // passkey "000000"
+    uint8 pairMode = GAPBOND_PAIRING_MODE_WAIT_FOR_REQ;
+    uint8 mitm = TRUE;
+    uint8 ioCap = GAPBOND_IO_CAP_DISPLAY_ONLY;
+    uint8 bonding = TRUE;
+    GAPBondMgr_SetParameter( GAPBOND_DEFAULT_PASSCODE, sizeof ( uint32 ), &passkey );
+    GAPBondMgr_SetParameter( GAPBOND_PAIRING_MODE, sizeof ( uint8 ), &pairMode );
+    GAPBondMgr_SetParameter( GAPBOND_MITM_PROTECTION, sizeof ( uint8 ), &mitm );
+    GAPBondMgr_SetParameter( GAPBOND_IO_CAPABILITIES, sizeof ( uint8 ), &ioCap );
+    GAPBondMgr_SetParameter( GAPBOND_BONDING_ENABLED, sizeof ( uint8 ), &bonding );
+  }  
 
   // Initialize GATT attributes
   GGS_AddService( GATT_ALL_SERVICES );            // GAP
   GATTServApp_AddService( GATT_ALL_SERVICES );    // GATT attributes
   DevInfo_AddService();                           // Device Information Service
+  Thermometer_AddService( GATT_ALL_SERVICES );
   
 #if defined FEATURE_OAD
   VOID OADTarget_AddService();                    // OAD Profile
 #endif
   
-  GATTConfig_SetThermoService(&CMTechThermometer_ServCBs);
+  Thermometer_RegisterAppCBs( &thermoServCBs );
 
-  RegisterForKeys( CMTechThermometer_TaskID );
+  RegisterForKeys( taskID );
 
   //在这里初始化GPIO
   //第一：所有管脚，reset后的状态都是输入加上拉
@@ -254,12 +241,12 @@ void CMTechThermometer_Init( uint8 task_id )
   Thermo_Init();
   
   // 初始化为待机模式
-  initAsStandbyMode();  
+  initIntoStandbyMode();  
  
   HCI_EXT_ClkDivOnHaltCmd( HCI_EXT_ENABLE_CLK_DIVIDE_ON_HALT );  
 
   // Setup a delayed profile startup
-  osal_set_event( CMTechThermometer_TaskID, TH_START_DEVICE_EVT );
+  osal_set_event( taskID, TH_START_DEVICE_EVT );
 }
 
 
@@ -308,9 +295,9 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
   {
     uint8 *pMsg;
 
-    if ( (pMsg = osal_msg_receive( CMTechThermometer_TaskID )) != NULL )
+    if ( (pMsg = osal_msg_receive( taskID )) != NULL )
     {
-      CMTechThermometer_ProcessOSALMsg( (osal_event_hdr_t *)pMsg );
+      processOSALMsg( (osal_event_hdr_t *)pMsg );
 
       // Release the OSAL message
       VOID osal_msg_deallocate( pMsg );
@@ -323,10 +310,10 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
   if ( events & TH_START_DEVICE_EVT )
   {    
     // Start the Device
-    VOID GAPRole_StartDevice( &CMTechThermometer_PeripheralCBs );
+    VOID GAPRole_StartDevice( &gapRoleStateCBs );
 
     // Start Bond Manager
-    VOID GAPBondMgr_Register( &CMTechThermometer_BondMgrCBs );
+    VOID GAPBondMgr_Register( &bondMgrCBs );
     
     switchFromStandbyToActive();
 
@@ -335,10 +322,10 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
   
   if ( events & TH_PERIODIC_EVT )
   {
-    if(thermoADEnabled)
+    if(ADCEnabled)
     {
       readAndProcessThermoData();
-      osal_start_timerEx( CMTechThermometer_TaskID, TH_PERIODIC_EVT, ADPeriod );
+      osal_start_timerEx( taskID, TH_PERIODIC_EVT, thermoInterval*1000L );
     }
     else
     {
@@ -373,59 +360,6 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
     return (events ^ TH_SWITCH_MODE_EVT);
   }  
   
-  // 预测温度事件
-  if ( events & TH_DP_PRECAST_EVT )
-  {
-    turnOnTone(1);
-    
-    Thermo_SetPreTemp(getPrecastTemp());
-    Thermo_SetShowPreTemp(TRUE);
-    
-    osal_start_timerEx(CMTechThermometer_TaskID, TH_STOP_SHOW_PRETEMP_EVT, THERMO_SHOW_PRETEMP);
-  
-    return (events ^ TH_DP_PRECAST_EVT);
-  }  
-  
-  // 停止显示预测温度事件
-  if ( events & TH_STOP_SHOW_PRETEMP_EVT )
-  {
-    Thermo_SetShowPreTemp(FALSE);
-  
-    return (events ^ TH_STOP_SHOW_PRETEMP_EVT);
-  }  
-  
-  
-  // 测温稳定事件
-  if ( events & TH_DP_STABLE_EVT )
-  {
-    turnOnTone(3);
-    
-    notifyTempStable();
-  
-    return (events ^ TH_DP_STABLE_EVT);
-  }    
-  
-  if ( events & TH_TONE_ON_EVT )
-  {
-    Thermo_ToneOn();
-    
-    osal_start_timerEx(CMTechThermometer_TaskID, TH_TONE_OFF_EVT, 500 );
-  
-    return (events ^ TH_TONE_ON_EVT);
-  }   
-  
-  if ( events & TH_TONE_OFF_EVT )
-  {
-    Thermo_ToneOff();
-    
-    if(--bzTimes > 0)
-    {
-      osal_start_timerEx(CMTechThermometer_TaskID, TH_TONE_ON_EVT, 500 );
-    }
-  
-    return (events ^ TH_TONE_OFF_EVT);
-  }    
-  
   // Discard unknown events
   return 0;
 }
@@ -442,12 +376,12 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
  *
  * @return  none
  */
-static void CMTechThermometer_ProcessOSALMsg( osal_event_hdr_t *pMsg )
+static void processOSALMsg( osal_event_hdr_t *pMsg )
 {
   switch ( pMsg->event )
   {
     case KEY_CHANGE:
-      CMTechThermometer_HandleKeys( ((keyChange_t *)pMsg)->state, ((keyChange_t *)pMsg)->keys );
+      handleKeys( ((keyChange_t *)pMsg)->state, ((keyChange_t *)pMsg)->keys );
       break;
 
     default:
@@ -456,9 +390,6 @@ static void CMTechThermometer_ProcessOSALMsg( osal_event_hdr_t *pMsg )
   }
 }
 
-
-
-#if defined( CC2540_MINIDK )
 /*********************************************************************
  * @fn      CMTechThermometer_HandleKeys
  *
@@ -471,21 +402,18 @@ static void CMTechThermometer_ProcessOSALMsg( osal_event_hdr_t *pMsg )
  *
  * @return  none
  */
-static void CMTechThermometer_HandleKeys( uint8 shift, uint8 keys )
+static void handleKeys( uint8 shift, uint8 keys )
 {
   VOID shift;  // Intentionally unreferenced parameter
 
   if ( keys & HAL_KEY_SW_1 )
   {
-    osal_set_event( CMTechThermometer_TaskID, TH_SWITCH_MODE_EVT);
+    osal_set_event( taskID, TH_SWITCH_MODE_EVT);
 
   } 
 }
-#endif // #if defined( CC2540_MINIDK )
 
-
-
-static void peripheralStateNotificationCB( gaprole_States_t newState )
+static void gapRoleStateCB( gaprole_States_t newState )
 {
   switch ( newState )
   {
@@ -564,16 +492,16 @@ static void peripheralStateNotificationCB( gaprole_States_t newState )
 
   }
   
-  gapProfileState = newState;
+  gapRoleState = newState;
 
 }
 
 
-static void thermometerServiceCB( uint8 paramID )
+static void thermoServCB( uint8 event )
 {
   uint8 newValue;
 
-  switch (paramID)
+  switch (event)
   {
     case THERMOMETER_CONF:
       Thermometer_GetParameter( THERMOMETER_CONF, &newValue );
@@ -585,7 +513,7 @@ static void thermometerServiceCB( uint8 paramID )
       
       else if ( newValue == THERMOMETER_CONF_CALIBRATION) // 进行标定
       {
-        osal_set_event( CMTechThermometer_TaskID, TH_CALIBRATION_EVT);
+        osal_set_event( taskID, TH_CALIBRATION_EVT);
       }
       
       else if ( newValue == THERMOMETER_CONF_LCDON) // 开LCD
@@ -605,9 +533,8 @@ static void thermometerServiceCB( uint8 paramID )
       
       break;
 
-    case THERMOMETER_PERI:
-      Thermometer_GetParameter( THERMOMETER_PERI, &newValue );
-      transNumOfADPeriod = newValue;
+    case THERMOMETER_INTERVAL_SET:
+      Thermometer_GetParameter( THERMOMETER_INTERVAL, (uint8*)&thermoInterval );
       break;
 
     default:
@@ -618,30 +545,18 @@ static void thermometerServiceCB( uint8 paramID )
 
 
 // 初始化为待机模式
-static void initAsStandbyMode()
+static void initIntoStandbyMode()
 {
   curMode = MODE_STANDBY;
   
   // 采样周期为1秒
-  ADPeriod = THERMOMETER_TIME_UNIT;
-  
-  // 传输周期为采样周期的1倍
-  transNumOfADPeriod = DEFAULT_TRANSMIT_PERIOD;  
-  
-  // 初始化蓝牙属性
-  // 温度为0
-  uint8 thermoData[THERMOMETER_DATA_LEN] = { 0, 0 };
-  Thermometer_SetParameter( THERMOMETER_DATA, THERMOMETER_DATA_LEN, thermoData );
-  
-  // 停止采集
-  uint8 thermoCfg = THERMOMETER_CONF_STANDBY;
-  Thermometer_SetParameter( THERMOMETER_CONF, sizeof(uint8), &thermoCfg );  
-  
+  thermoInterval = 1;
+    
   // 设置传输周期
-  Thermometer_SetParameter( THERMOMETER_PERI, sizeof(uint8), &transNumOfADPeriod ); 
+  Thermometer_SetParameter( THERMOMETER_INTERVAL, sizeof(uint16), &thermoInterval ); 
   
   // 停止采样
-  thermoADEnabled = FALSE;
+  ADCEnabled = FALSE;
 }
 
 
@@ -653,20 +568,12 @@ static void switchFromStandbyToActive( void )
   Thermo_HardwareOn();
   
   // 开始广播
-  GAPConfig_EnableAdv(TRUE);    
-
-  // 获取输出值类型  
-  uint8 thermoCfg = Thermo_GetValueType();
-  Thermometer_SetParameter( THERMOMETER_CONF, sizeof(uint8), &thermoCfg ); 
+  uint8 advertising = TRUE;
+  GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );  
   
   // 显示上次最大值后，开始AD采样
-  thermoADEnabled = TRUE;
-  osal_start_timerEx( CMTechThermometer_TaskID, TH_PERIODIC_EVT, THERMO_LASTMAXTEMP_SHOWTIME);
-  
-  // 重新计数
-  haveSendNum = 0;
-  
-  DP_Init(CMTechThermometer_TaskID);
+  ADCEnabled = TRUE;
+  osal_start_timerEx( taskID, TH_PERIODIC_EVT, THERMO_SHOWLASTMAXTEMP_TIME);
 }
 
 
@@ -675,25 +582,24 @@ static void switchFromActiveToStandby( void )
   curMode = MODE_STANDBY;
   
   // 停止AD
-  thermoADEnabled = FALSE;
-  osal_stop_timerEx( CMTechThermometer_TaskID, TH_PERIODIC_EVT);
+  ADCEnabled = FALSE;
+  osal_stop_timerEx( taskID, TH_PERIODIC_EVT);
   
   // 终止蓝牙连接
-  if ( gapProfileState == GAPROLE_CONNECTED )
+  if ( gapRoleState == GAPROLE_CONNECTED )
   {
-    GAPConfig_TerminateConn();
+    GAPRole_TerminateConnection( );
   }
   
   // 停止广播
-  GAPConfig_EnableAdv(FALSE);   
+  uint8 advertising = FALSE;
+  GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );    
   
   // 关硬件
   Thermo_HardwareOff();
   
   initIOPin();
 }
-
-
 
 
 static void readAndProcessThermoData()
@@ -710,27 +616,5 @@ static void readAndProcessThermoData()
   // 在液晶屏上显示数据
   Thermo_ShowValueOnLCD(1, value);
   
-  // 到了传输周期，就发送蓝牙数据属性值
-  if(++haveSendNum >= transNumOfADPeriod)
-  {
-    Thermometer_SetParameter( THERMOMETER_DATA, THERMOMETER_DATA_LEN, (uint8*)&value); 
-    haveSendNum = 0;
-  }
-
-  // 如果是温度数据，去处理它
-  if(Thermo_GetValueType() == THERMOMETER_VALUETYPE_T)
-  {
-    DP_Process(value);
-  }
+  Thermometer_SetParameter( THERMOMETER_DATA, THERMOMETER_DATA_LEN, (uint8*)&value); 
 }
-
-// 让蜂鸣器响指定次数
-static void turnOnTone(uint8 times)
-{
-  bzTimes = times;
-  osal_set_event(CMTechThermometer_TaskID, TH_TONE_ON_EVT);
-}
-
-
-/*********************************************************************
-*********************************************************************/

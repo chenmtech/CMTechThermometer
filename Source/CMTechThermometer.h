@@ -45,14 +45,6 @@ extern "C"
 {
 #endif
 
-/*********************************************************************
- * INCLUDES
- */
-
-/*********************************************************************
- * CONSTANTS
- */
-
 
 // CMTech Thermometer Task Events
 #define TH_START_DEVICE_EVT                   0x0001     // 启动设备事件
@@ -74,13 +66,6 @@ extern "C"
 #define THERMOMETER_CFG_LCDON              0x05    // 开LCD
 #define THERMOMETER_CFG_LCDOFF             0x06    // 关LCD
 
-/*********************************************************************
- * MACROS
- */
-
-/*********************************************************************
- * FUNCTIONS
- */
 
 /*
  * Task Initialization for the BLE Application

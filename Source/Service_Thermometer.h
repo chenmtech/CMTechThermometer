@@ -42,15 +42,6 @@
 #define THERMOMETER_INTERVAL_SET              4
 
 
-
-
-// 体温值的字节长度
-#define THERMOMETER_TEMP_LEN     2
-
-#define THERMOMETER_MIN_PERIOD        1000    //最小采样周期为1000ms
-
-#define THERMOMETER_TIME_UNIT         1000    //采样周期时间单位为1000ms
-
 /**
  * Thermometer Interval Range 
  */
