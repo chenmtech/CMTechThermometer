@@ -1,45 +1,3 @@
-/**************************************************************************************************
-  Filename:       CMTechThermometer.c
-  Revised:        $Date: 2010-08-06 08:56:11 -0700 (Fri, 06 Aug 2010) $
-  Revision:       $Revision: 23333 $
-
-  Description:    This file contains the Simple BLE Peripheral sample application
-                  for use with the CC2540 Bluetooth Low Energy Protocol Stack.
-
-  Copyright 2010 - 2013 Texas Instruments Incorporated. All rights reserved.
-
-  IMPORTANT: Your use of this Software is limited to those specific rights
-  granted under the terms of a software license agreement between the user
-  who downloaded the software, his/her employer (which must be your employer)
-  and Texas Instruments Incorporated (the "License").  You may not use this
-  Software unless you agree to abide by the terms of the License. The License
-  limits your use, and you acknowledge, that the Software may not be modified,
-  copied or distributed unless embedded on a Texas Instruments microcontroller
-  or used solely and exclusively in conjunction with a Texas Instruments radio
-  frequency transceiver, which is integrated into your product.  Other than for
-  the foregoing purpose, you may not use, reproduce, copy, prepare derivative
-  works of, modify, distribute, perform, display or sell this Software and/or
-  its documentation for any purpose.
-
-  YOU FURTHER ACKNOWLEDGE AND AGREE THAT THE SOFTWARE AND DOCUMENTATION ARE
-  PROVIDED 揂S IS?WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-  INCLUDING WITHOUT LIMITATION, ANY WARRANTY OF MERCHANTABILITY, TITLE,
-  NON-INFRINGEMENT AND FITNESS FOR A PARTICULAR PURPOSE. IN NO EVENT SHALL
-  TEXAS INSTRUMENTS OR ITS LICENSORS BE LIABLE OR OBLIGATED UNDER CONTRACT,
-  NEGLIGENCE, STRICT LIABILITY, CONTRIBUTION, BREACH OF WARRANTY, OR OTHER
-  LEGAL EQUITABLE THEORY ANY DIRECT OR INDIRECT DAMAGES OR EXPENSES
-  INCLUDING BUT NOT LIMITED TO ANY INCIDENTAL, SPECIAL, INDIRECT, PUNITIVE
-  OR CONSEQUENTIAL DAMAGES, LOST PROFITS OR LOST DATA, COST OF PROCUREMENT
-  OF SUBSTITUTE GOODS, TECHNOLOGY, SERVICES, OR ANY CLAIMS BY THIRD PARTIES
-  (INCLUDING BUT NOT LIMITED TO ANY DEFENSE THEREOF), OR OTHER SIMILAR COSTS.
-
-  Should you have any questions regarding your right to use this Software,
-  contact Texas Instruments Incorporated at www.TI.com.
-**************************************************************************************************/
-
-/*********************************************************************
- * INCLUDES
- */
 
 #include "bcomdef.h"
 #include "OSAL.h"
@@ -74,23 +32,22 @@
 
 #define INVALID_CONNHANDLE                    0xFFFF
 
-#if defined ( PLUS_BROADCASTER )
-  #define ADV_IN_CONN_WAIT                    500 // delay 500 ms
-#endif
+// two work modes
+#define MODE_ACTIVE         0x00             // active mode
+#define MODE_STANDBY        0x01             // standby mode
 
-// two modes
-#define MODE_ACTIVE         0             // active mode
-#define MODE_STANDBY        1             // standby mode
-#define THERMO_SHOWLASTMAXTEMP_TIME           3000 // the time that showing the last max temp, unit: second
-#define THERMO_SHOWPRETEMP_TIME               20000 // the time that showing the predicted temp
+#define STATUS_MEAS_START   0x00
+#define STATUS_MEAS_STOP    0x01
 
 /* Ative delay: 125 cycles ~1 msec */
 #define ST_HAL_DELAY(n) st( { volatile uint32 i; for (i=0; i<(n); i++) { }; } )
 
+#define DEFAULT_MEAS_INTERVAL 2
 
-static uint8 curMode = MODE_STANDBY; // current mode
-static bool ADCEnabled = FALSE; // is the ADC enabled
-static uint16 thermoInterval = 1; // temperature measurement interval, uint: second
+static uint8 mode = MODE_STANDBY; // current mode
+static uint8 status = STATUS_MEAS_STOP;
+static uint16 thermoInterval = DEFAULT_MEAS_INTERVAL; // temperature measurement interval, uint: second
+static attHandleValueInd_t tempInd;
 
 // advertise data
 static uint8 advertData[] = 
@@ -104,7 +61,6 @@ static uint8 advertData[] =
   GAP_ADTYPE_16BIT_MORE,
   LO_UINT16( THERMOMETER_SERV_UUID ),
   HI_UINT16( THERMOMETER_SERV_UUID ),
-
 };
 
 // scan response data
@@ -123,6 +79,7 @@ static uint8 scanResponseData[] =
 static uint8 attDeviceName[GAP_DEVICE_NAME_LEN] = "CM Thermometer";
 
 static uint8 taskID;   // Task ID for internal task/event processing
+static uint16 gapConnHandle = INVALID_CONNHANDLE;
 static gaprole_States_t gapRoleState = GAPROLE_INIT;
 
 static void processOSALMsg( osal_event_hdr_t *pMsg );
@@ -149,11 +106,12 @@ static thermometerServiceCBs_t thermoServCBs =
   thermoServCB    // Charactersitic value change callback
 };
 
-static void initIntoStandbyMode(); // initialize into the standby mode
-static void switchFromStandbyToActive( void ); // switch from standby mode to active mode
-static void switchFromActiveToStandby( void );// switch from active mode to standby mode
-static void readAndProcessThermoData(); // read and process thermo-related data
+static void switchToActiveMode( void ); // switch from standby mode to active mode
+static void switchToStandbyMode( void );// switch from active mode to standby mode
+static void notifyTemperature(float temp); // read and process thermo-related data
 static void initIOPin(); // initialize the I/O pins
+static void startTempMeas( void );
+static void stopTempMeas( void );
 
 
 extern void CMTechThermometer_Init( uint8 task_id )
@@ -221,7 +179,12 @@ extern void CMTechThermometer_Init( uint8 task_id )
 #endif
   
   Thermometer_RegisterAppCBs( &thermoServCBs );
-
+  
+  // set temp measurement interval
+  thermoInterval = 1;
+  Thermometer_SetParameter( THERMOMETER_INTERVAL, sizeof(uint16), &thermoInterval ); 
+  
+  // Register for all key events - This app will handle all key events
   RegisterForKeys( taskID );
 
   //在这里初始化GPIO
@@ -232,17 +195,11 @@ extern void CMTechThermometer_Init( uint8 task_id )
     // For keyfob board set GPIO pins into a power-optimized state
     // Note that there is still some leakage current from the buzzer,
     // accelerometer, LEDs, and buttons on the PCB.
-    
-    // Register for all key events - This app will handle all key events
-    
     initIOPin();
   }
 
   Thermo_Init();
-  
-  // 初始化为待机模式
-  initIntoStandbyMode();  
- 
+
   HCI_EXT_ClkDivOnHaltCmd( HCI_EXT_ENABLE_CLK_DIVIDE_ON_HALT );  
 
   // Setup a delayed profile startup
@@ -273,20 +230,8 @@ static void initIOPin()
   I2CIO = 0x00;
 }
 
-/*********************************************************************
- * @fn      SimpleBLEPeripheral_ProcessEvent
- *
- * @brief   Simple BLE Peripheral Application Task event processor.  This function
- *          is called to process all events for the task.  Events
- *          include timers, messages and any other user defined events.
- *
- * @param   task_id  - The OSAL assigned task ID.
- * @param   events - events to process.  This is a bit map and can
- *                   contain more than one event.
- *
- * @return  events not processed
- */
-uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
+
+extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
 {
 
   VOID task_id; // OSAL required parameter that isn't used in this function
@@ -315,67 +260,62 @@ uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
     // Start Bond Manager
     VOID GAPBondMgr_Register( &bondMgrCBs );
     
-    switchFromStandbyToActive();
+    switchToActiveMode();
 
     return ( events ^ TH_START_DEVICE_EVT );
   }
   
-  if ( events & TH_PERIODIC_EVT )
+  if ( events & TH_MEAS_PERIODIC_EVT )
   {
-    if(ADCEnabled)
-    {
-      readAndProcessThermoData();
-      osal_start_timerEx( taskID, TH_PERIODIC_EVT, thermoInterval*1000L );
+    if(status == STATUS_MEAS_START) {
+      osal_start_timerEx( taskID, TH_MEAS_PERIODIC_EVT, thermoInterval*1000L );
+      
+      // get value
+      uint16 value = Thermo_GetValue();  
+      if(value != FAILURE)
+      {
+        // update max value
+        Thermo_UpdateMaxValue(value);          
+        // show data
+        Thermo_ShowValueOnLCD(1, value);
+        
+        if(gapRoleState == GAPROLE_CONNECTED) {
+          float temp = (float)value/100.0f;
+          notifyTemperature(temp);
+        }
+      }
     }
-    else
-    {
-      // 停止AD采集
-      //Thermo_TurnOff_AD();
-    }
 
-    return (events ^ TH_PERIODIC_EVT);
-  }
-
+    return (events ^ TH_MEAS_PERIODIC_EVT);
+  } 
   
-  // 标定
-  if ( events & TH_CALIBRATION_EVT )
-  {
-    Thermo_DoCalibration();
-
-    return (events ^ TH_CALIBRATION_EVT);
-  }  
-  
-  // 切换工作模式
+  // switch work mode
   if ( events & TH_SWITCH_MODE_EVT )
   {
-    if(curMode == MODE_ACTIVE)
+    if(mode == MODE_ACTIVE)
     {
-      switchFromActiveToStandby();
+      switchToStandbyMode();
     }
     else
     {
-      switchFromStandbyToActive();
+      switchToActiveMode();
     }    
 
     return (events ^ TH_SWITCH_MODE_EVT);
   }  
   
+  // do calibration
+  if ( events & TH_DO_CALIBRATION_EVT )
+  {
+    Thermo_DoCalibration();
+
+    return (events ^ TH_DO_CALIBRATION_EVT);
+  } 
+  
   // Discard unknown events
   return 0;
 }
 
-
-
-
-/*********************************************************************
- * @fn      simpleBLEPeripheral_ProcessOSALMsg
- *
- * @brief   Process an incoming task message.
- *
- * @param   pMsg - message to process
- *
- * @return  none
- */
 static void processOSALMsg( osal_event_hdr_t *pMsg )
 {
   switch ( pMsg->event )
@@ -390,18 +330,6 @@ static void processOSALMsg( osal_event_hdr_t *pMsg )
   }
 }
 
-/*********************************************************************
- * @fn      CMTechThermometer_HandleKeys
- *
- * @brief   Handles all key events for this device.
- *
- * @param   shift - true if in shift/alt.
- * @param   keys - bit field for key events. Valid entries:
- *                 HAL_KEY_SW_2
- *                 HAL_KEY_SW_1
- *
- * @return  none
- */
 static void handleKeys( uint8 shift, uint8 keys )
 {
   VOID shift;  // Intentionally unreferenced parameter
@@ -415,122 +343,51 @@ static void handleKeys( uint8 shift, uint8 keys )
 
 static void gapRoleStateCB( gaprole_States_t newState )
 {
-  switch ( newState )
+  // 已连接
+  if( newState == GAPROLE_CONNECTED)
   {
-    case GAPROLE_STARTED:
-      {
-        uint8 ownAddress[B_ADDR_LEN];
-        uint8 systemId[DEVINFO_SYSTEM_ID_LEN];
-
-        GAPRole_GetParameter(GAPROLE_BD_ADDR, ownAddress);
-
-        // use 6 bytes of device address for 8 bytes of system ID value
-        systemId[0] = ownAddress[0];
-        systemId[1] = ownAddress[1];
-        systemId[2] = ownAddress[2];
-
-        // set middle bytes to zero
-        systemId[4] = 0x00;
-        systemId[3] = 0x00;
-
-        // shift three bytes up
-        systemId[7] = ownAddress[5];
-        systemId[6] = ownAddress[4];
-        systemId[5] = ownAddress[3];
-
-        DevInfo_SetParameter(DEVINFO_SYSTEM_ID, DEVINFO_SYSTEM_ID_LEN, systemId);
-      }
-      break;
-
-    case GAPROLE_ADVERTISING:
-      {
-        #if (defined HAL_LCD) && (HAL_LCD == TRUE)
-          HalLcdWriteString( "Advertising",  HAL_LCD_LINE_3 );
-        #endif // (defined HAL_LCD) && (HAL_LCD == TRUE)
-      }
-      break;
-
-    case GAPROLE_CONNECTED:
-
-
-      break;
-
-    case GAPROLE_WAITING:
-      {
-        #if (defined HAL_LCD) && (HAL_LCD == TRUE)
-          HalLcdWriteString( "Disconnected",  HAL_LCD_LINE_3 );
-        #endif // (defined HAL_LCD) && (HAL_LCD == TRUE)
-          
-        // 断开连接时，停止AD采集
-        //Thermo_TurnOff_AD();
-      }
-      break;
-
-    case GAPROLE_WAITING_AFTER_TIMEOUT:
-      {
-        #if (defined HAL_LCD) && (HAL_LCD == TRUE)
-          HalLcdWriteString( "Timed Out",  HAL_LCD_LINE_3 );
-        #endif // (defined HAL_LCD) && (HAL_LCD == TRUE)
-      }
-      break;
-
-    case GAPROLE_ERROR:
-      {
-        #if (defined HAL_LCD) && (HAL_LCD == TRUE)
-          HalLcdWriteString( "Error",  HAL_LCD_LINE_3 );
-        #endif // (defined HAL_LCD) && (HAL_LCD == TRUE)
-      }
-      break;
-
-    default:
-      {
-        #if (defined HAL_LCD) && (HAL_LCD == TRUE)
-          HalLcdWriteString( "",  HAL_LCD_LINE_3 );
-        #endif // (defined HAL_LCD) && (HAL_LCD == TRUE)
-      }
-      break;
-
+    // Get connection handle
+    GAPRole_GetParameter( GAPROLE_CONNHANDLE, &gapConnHandle );
+  }
+  // 断开连接
+  else if(gapRoleState == GAPROLE_CONNECTED && 
+            newState != GAPROLE_CONNECTED)
+  {
+    stopTempMeas();
+    //initIOPin();
+  }
+  // if started
+  else if (newState == GAPROLE_STARTED)
+  {
+    // Set the system ID from the bd addr
+    uint8 systemId[DEVINFO_SYSTEM_ID_LEN];
+    GAPRole_GetParameter(GAPROLE_BD_ADDR, systemId);
+    
+    // shift three bytes up
+    systemId[7] = systemId[5];
+    systemId[6] = systemId[4];
+    systemId[5] = systemId[3];
+    
+    // set middle bytes to zero
+    systemId[4] = 0;
+    systemId[3] = 0;
+    
+    DevInfo_SetParameter(DEVINFO_SYSTEM_ID, DEVINFO_SYSTEM_ID_LEN, systemId);
   }
   
   gapRoleState = newState;
-
 }
-
 
 static void thermoServCB( uint8 event )
 {
-  uint8 newValue;
-
   switch (event)
   {
-    case THERMOMETER_CONF:
-      Thermometer_GetParameter( THERMOMETER_CONF, &newValue );
-      
-      if ( newValue == THERMOMETER_CONF_STANDBY)  // 停止采集，进入待机模式
-      {
-        switchFromActiveToStandby();
-      }
-      
-      else if ( newValue == THERMOMETER_CONF_CALIBRATION) // 进行标定
-      {
-        osal_set_event( taskID, TH_CALIBRATION_EVT);
-      }
-      
-      else if ( newValue == THERMOMETER_CONF_LCDON) // 开LCD
-      {
-        Thermo_TurnOn_LCD();
-      }   
-      
-      else if ( newValue == THERMOMETER_CONF_LCDOFF) // 关LCD
-      {
-        Thermo_TurnOff_LCD();
-      }  
-      
-      else // 剩下的就是设置数据类型
-      { 
-        Thermo_SetValueType(newValue);
-      }
-      
+    case THERMOMETER_TEMP_IND_ENABLED:
+      startTempMeas();
+      break;
+        
+    case THERMOMETER_TEMP_IND_DISABLED:
+      stopTempMeas();
       break;
 
     case THERMOMETER_INTERVAL_SET:
@@ -543,47 +400,24 @@ static void thermoServCB( uint8 event )
   }
 }
 
-
-// 初始化为待机模式
-static void initIntoStandbyMode()
-{
-  curMode = MODE_STANDBY;
-  
-  // 采样周期为1秒
-  thermoInterval = 1;
-    
-  // 设置传输周期
-  Thermometer_SetParameter( THERMOMETER_INTERVAL, sizeof(uint16), &thermoInterval ); 
-  
-  // 停止采样
-  ADCEnabled = FALSE;
-}
-
-
-static void switchFromStandbyToActive( void )
+static void switchToActiveMode( void )
 {  
-  curMode = MODE_ACTIVE;
+  mode = MODE_ACTIVE;
   
-  // 开硬件
-  Thermo_HardwareOn();
-  
-  // 开始广播
+  // start advertising
   uint8 advertising = TRUE;
-  GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );  
+  GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );    
   
-  // 显示上次最大值后，开始AD采样
-  ADCEnabled = TRUE;
-  osal_start_timerEx( taskID, TH_PERIODIC_EVT, THERMO_SHOWLASTMAXTEMP_TIME);
+  // turn on the hardware and show the last max value
+  Thermo_HardwareOn();
 }
 
-
-static void switchFromActiveToStandby( void )
+static void switchToStandbyMode( void )
 { 
-  curMode = MODE_STANDBY;
+  mode = MODE_STANDBY;
   
-  // 停止AD
-  ADCEnabled = FALSE;
-  osal_stop_timerEx( taskID, TH_PERIODIC_EVT);
+  osal_stop_timerEx( taskID, TH_MEAS_PERIODIC_EVT);
+  status = STATUS_MEAS_STOP;
   
   // 终止蓝牙连接
   if ( gapRoleState == GAPROLE_CONNECTED )
@@ -602,19 +436,32 @@ static void switchFromActiveToStandby( void )
 }
 
 
-static void readAndProcessThermoData()
+static void notifyTemperature(float temp)
 {
-  // 获取数据
-  uint16 value = Thermo_GetValue();  
-  
-  // 错误数据，不发送，不显示
-  if(value == FAILURE) return;   
-  
-  // 更新数据最大值
-  Thermo_UpdateMaxValue(value);  
-  
-  // 在液晶屏上显示数据
-  Thermo_ShowValueOnLCD(1, value);
-  
-  Thermometer_SetParameter( THERMOMETER_DATA, THERMOMETER_DATA_LEN, (uint8*)&value); 
+  // notify temp
+  uint8* p = tempInd.value;
+  uint8* pTemp = (uint8*)&temp;
+  *p++ = 0x00;
+  *p++ = *(pTemp+3);
+  *p++ = *(pTemp+2);
+  *p++ = *(pTemp+1);
+  *p++ = *pTemp;
+  tempInd.len = 5;
+  Thermometer_TempIndicate( gapConnHandle, &tempInd, taskID );
+}
+
+// 
+static void startTempMeas( void )
+{  
+  if(status == STATUS_MEAS_STOP) {
+    status = STATUS_MEAS_START;
+    osal_start_timerEx( taskID, TH_MEAS_PERIODIC_EVT, thermoInterval*1000L);
+  }
+}
+
+// 
+static void stopTempMeas( void )
+{  
+  status = STATUS_MEAS_STOP;
+  osal_stop_timerEx( taskID, TH_MEAS_PERIODIC_EVT ); 
 }

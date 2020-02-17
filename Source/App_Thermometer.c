@@ -95,8 +95,6 @@ static uint16 valueUpLimit = UPLIMIT_T; // up limit of value
 static uint16 lastMaxValue = 0; // last max value
 static uint16 maxValue = 0; // max value measured in this time
 static uint16 curValue = 32768;   // current value measured. 32768 which is a value that can't reached.
-static uint16 preTemp = 0; // predicted temperature
-static bool isShowPreTemp = FALSE; // is the predicted temp showed
 
 // 由AD输出值查表计算电阻值
 static uint16 calcRFromADValue(uint16 ADValue);
@@ -135,7 +133,7 @@ extern void Thermo_Init()
     caliValue = 0;    
 }
 
-// turn off the hardware, including the LCD and ADC
+// save the max value and then turn off the hardware, including the LCD and ADC
 extern void Thermo_HardwareOff()
 {  
   // 保存最大值到NV
@@ -151,7 +149,7 @@ extern void Thermo_HardwareOff()
 }
 
 
-// 开硬件：开LCD，开AD, 显示上次最大值
+// turn on the hardware, including the LCD and ADC, and then read the last max value and show it.
 extern void Thermo_HardwareOn()
 {
   // 从NV读取上次最高温度值，并设置
@@ -160,9 +158,6 @@ extern void Thermo_HardwareOn()
   maxValue = 0;  
   
   curValue = 32768;
-  
-  preTemp = 0;
-  isShowPreTemp = FALSE;
 
   // 开LCD
   HT1621B_TurnOnLCD();  
@@ -253,15 +248,7 @@ extern uint16 Thermo_UpdateMaxValue(uint16 value)
 
 // 在LCD上显示一个值
 extern void Thermo_ShowValueOnLCD(uint8 location, uint16 value)
-{
-  // 如果要显示预测温度
-  if( isShowPreTemp && (valueType == THERMOMETER_CFG_VALUETYPE_T) )
-  {
-    HT1621B_ShowTemperature(location, preTemp, TRUE);
-    curValue = 32768;
-    return;
-  }
-  
+{ 
   // 如果值与当前值相同，就不显示了。
   if( curValue == value ) return;
   
@@ -290,28 +277,16 @@ extern void Thermo_ShowValueOnLCD(uint8 location, uint16 value)
 }
 
 // 开LCD
-extern void Thermo_TurnOn_LCD()
+extern void Thermo_LCDOn()
 {
   HT1621B_TurnOnLCD();
   HT1621B_ClearLCD();
 }
 
 // 关LCD
-extern void Thermo_TurnOff_LCD()
+extern void Thermo_LCDOff()
 {
   HT1621B_TurnOffLCD();
-}
-
-// 开AD
-extern void Thermo_TurnOn_AD()
-{
-  ADS1100_TurnOn();
-}
-
-// 关AD
-extern void Thermo_TurnOff_AD()
-{
-  ADS1100_TurnOff();
 }
 
 // 开蜂鸣器
@@ -325,19 +300,6 @@ extern void Thermo_ToneOff()
 {
   HT1621B_ToneOff(); 
 }
-
-// 设置预测温度值
-extern void Thermo_SetPreTemp(uint16 temp)
-{
-  preTemp = temp;
-}
-
-// 是否显示预测温度值
-extern void Thermo_isShowPreTemp(bool show)
-{
-  isShowPreTemp = show;  
-}
-
 
 // 获取AD值
 static uint16 getADValue()

@@ -49,7 +49,7 @@ static uint8 thermoTemp = 0;
 static gattCharCfg_t thermoTempConfig[GATT_MAX_NUM_CONN];
 
 static uint8 thermoTypeProps = GATT_PROP_READ;
-static uint8 thermoType = 0;    
+static uint8 thermoType = THERMOMETER_TYPE_ARMPIT;    
 
 // interval£¬unit: second
 static uint8 thermoIntervalProps = GATT_PROP_READ | GATT_PROP_WRITE;
