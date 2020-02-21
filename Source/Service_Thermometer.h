@@ -12,15 +12,15 @@
 #define THERMOMETER_INTERVAL               3       // measurement interval
 #define THERMOMETER_IRANGE                 4       // interval range: [min, max]
 
-// service, characteristic and descriptor UUID
+// UUID of the service, characteristics and descriptors
 #define THERMOMETER_SERV_UUID    0x1809
 #define THERMOMETER_TEMP_UUID    0x2A1C
 #define THERMOMETER_TYPE_UUID    0x2A1D
 #define THERMOMETER_INTERVAL_UUID    0x2A21
 #define THERMOMETER_IRANGE_UUID 0x2906
 
-// Position  in attribute array
-#define THERMOMETER_TEMP_VALUE_POS            2
+// Position in service attribute table
+#define THERMOMETER_TEMP_VALUE_POS            2  // temperature measurement value position
 
 // Values for sensor location
 #define THERMOMETER_TYPE_ARMPIT            0x01
@@ -33,18 +33,16 @@
 #define THERMOMETER_TYPE_TOE               0x08
 #define THERMOMETER_TYPE_TYMPNUM           0x09
 
-// service bit field
+// Service bit field
 #define THERMOMETER_SERVICE               0x00000001
 
-// callback events
-#define THERMOMETER_TEMP_IND_ENABLED          1
-#define THERMOMETER_TEMP_IND_DISABLED         2
-#define THERMOMETER_INTERVAL_SET              4
+// Callback events
+#define THERMOMETER_TEMP_IND_ENABLED          0
+#define THERMOMETER_TEMP_IND_DISABLED         1
+#define THERMOMETER_INTERVAL_SET              2
 
 
-/**
- * Thermometer Interval Range 
- */
+// Thermometer Interval Range Struct
 typedef struct
 {
   uint16 low;         
@@ -52,28 +50,27 @@ typedef struct
 } thermoIRange_t;
 
 
-typedef NULL_OK void (*thermometerServiceCB_t)( uint8 paramID );
-
+typedef NULL_OK void (*thermoServCB_t)( uint8 paramID );
 
 typedef struct
 {
-  thermometerServiceCB_t        pfnThermometerServiceCB;  // Called when characteristic value changes
-} thermometerServiceCBs_t;
+  thermoServCB_t        pfnThermoServCB;  // Called when characteristic value changes
+} thermoServCBs_t;
 
 
-// 加载本服务
+// Add Service
 extern bStatus_t Thermometer_AddService( uint32 services );
 
-// 登记应用层回调
-extern bStatus_t Thermometer_RegisterAppCBs( thermometerServiceCBs_t *appCallbacks );
+// Register service callback
+extern bStatus_t Thermometer_RegisterAppCBs( thermoServCBs_t *appCBs );
 
-// 设置特征值
+// set the service parameter
 extern bStatus_t Thermometer_SetParameter( uint8 param, uint8 len, void *value );
 
-// 读取特征值
+// set the service parameter
 extern bStatus_t Thermometer_GetParameter( uint8 param, void *value );
 
-// indicate thermometer data
+// indicate thermometer temperature measurement value
 extern bStatus_t Thermometer_TempIndicate( uint16 connHandle, attHandleValueInd_t * pIndi, uint8 taskId );
 
 #endif

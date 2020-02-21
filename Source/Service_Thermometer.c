@@ -7,7 +7,6 @@
 #include "gatt_uuid.h"
 #include "gattservapp.h"
 #include "gapbondmgr.h"
-#include "cmutil.h"
 
 #include "Service_Thermometer.h"
 
@@ -28,13 +27,11 @@ CONST uint8 thermoTypeUUID[ATT_BT_UUID_SIZE] =
   LO_UINT16(THERMOMETER_TYPE_UUID), HI_UINT16(THERMOMETER_TYPE_UUID)
 };
 
-// measurement interval UUID
 CONST uint8 thermoIntervalUUID[ATT_BT_UUID_SIZE] =
 { 
   LO_UINT16(THERMOMETER_INTERVAL_UUID), HI_UINT16(THERMOMETER_INTERVAL_UUID)
 };
 
-// interval range UUID
 CONST uint8 thermoIRangeUUID[ATT_BT_UUID_SIZE] =
 { 
   LO_UINT16(THERMOMETER_IRANGE_UUID), HI_UINT16(THERMOMETER_IRANGE_UUID)
@@ -43,9 +40,8 @@ CONST uint8 thermoIRangeUUID[ATT_BT_UUID_SIZE] =
 // 
 static CONST gattAttrType_t thermoService = { ATT_BT_UUID_SIZE, thermoServUUID };
 
-
 static uint8 thermoTempProps = GATT_PROP_INDICATE;
-static uint8 thermoTemp = 0;
+static uint8 thermoTemp = 0; // not saved here actually
 static gattCharCfg_t thermoTempConfig[GATT_MAX_NUM_CONN];
 
 static uint8 thermoTypeProps = GATT_PROP_READ;
@@ -58,8 +54,7 @@ static uint16 thermoInterval = 2;
 // interval range
 static thermoIRange_t  thermoIRange = {1,60};
 
-
-// 服务的属性表
+// service attribute table
 static gattAttribute_t thermoServAttrTbl[] = 
 {
   // thermo Service
@@ -129,7 +124,7 @@ static gattAttribute_t thermoServAttrTbl[] =
         (uint8*)&thermoInterval
       },
       
-      // Characteristic Descriptor
+      // Characteristic Range Descriptor
       { 
         { ATT_BT_UUID_SIZE, thermoIRangeUUID },
         GATT_PERMIT_READ,
@@ -139,9 +134,9 @@ static gattAttribute_t thermoServAttrTbl[] =
 };
 
 // 
-static thermometerServiceCBs_t *appCBs = NULL;
+static thermoServCBs_t *appCBs = NULL;
 
-static uint8 readAttrCB( uint16 connHandle, gattAttribute_t *pAttr, 
+static bStatus_t readAttrCB( uint16 connHandle, gattAttribute_t *pAttr, 
                             uint8 *pValue, uint8 *pLen, uint16 offset, uint8 maxLen );
 static bStatus_t writeAttrCB( uint16 connHandle, gattAttribute_t *pAttr,
                                  uint8 *pValue, uint8 len, uint16 offset );
@@ -152,7 +147,6 @@ CONST gattServiceCBs_t servCBs =
   writeAttrCB,     // Write callback function pointer
   NULL             // Authorization callback function pointer
 };
-
 
 static void handleConnStatusCB( uint16 connHandle, uint8 changeType );
 
@@ -180,7 +174,7 @@ extern bStatus_t Thermometer_AddService( uint32 services )
 
 
 // 登记应用层给的回调
-extern bStatus_t Thermometer_RegisterAppCBs( thermometerServiceCBs_t *appCallbacks )
+extern bStatus_t Thermometer_RegisterAppCBs( thermoServCBs_t *appCallbacks )
 {
   if ( appCallbacks )
   {
@@ -273,7 +267,7 @@ extern bStatus_t Thermometer_TempIndicate( uint16 connHandle, attHandleValueInd_
 }
 
 
-static uint8 readAttrCB( uint16 connHandle, gattAttribute_t *pAttr, 
+static bStatus_t readAttrCB( uint16 connHandle, gattAttribute_t *pAttr, 
                             uint8 *pValue, uint8 *pLen, uint16 offset, uint8 maxLen )
 {
   bStatus_t status = SUCCESS;
@@ -298,24 +292,24 @@ static uint8 readAttrCB( uint16 connHandle, gattAttribute_t *pAttr,
   switch ( uuid )
   {
     case THERMOMETER_TYPE_UUID:
-        *pLen = 1;
-        *pValue = thermoType;
-        break;
+      *pLen = 1;
+      *pValue = thermoType;
+      break;
         
-      case THERMOMETER_INTERVAL_UUID:
-        *pLen = 2;
-        VOID osal_memcpy( pValue, &thermoInterval, 2 ) ;
-        break;
+    case THERMOMETER_INTERVAL_UUID:
+      *pLen = 2;
+      VOID osal_memcpy( pValue, (uint8*)&thermoInterval, 2 ) ;
+      break;
 
-      case THERMOMETER_IRANGE_UUID:
-        *pLen = 4;
-         VOID osal_memcpy( pValue, &thermoIRange, 4 ) ;
-        break;        
-        
-      default:
-        *pLen = 0;
-        status = ATT_ERR_ATTR_NOT_FOUND;
-        break;
+    case THERMOMETER_IRANGE_UUID:
+      *pLen = 4;
+       VOID osal_memcpy( pValue, (uint8*)&thermoIRange, 4 ) ;
+      break;        
+      
+    default:
+      *pLen = 0;
+      status = ATT_ERR_ATTR_NOT_FOUND;
+      break;
   }  
   
   return status;
@@ -338,7 +332,7 @@ static bStatus_t writeAttrCB( uint16 connHandle, gattAttribute_t *pAttr,
       {
         uint16 value = BUILD_UINT16( pValue[0], pValue[1] );      
       
-        (appCBs->pfnThermometerServiceCB)( (value == GATT_CFG_NO_OPERATION) ? 
+        (appCBs->pfnThermoServCB)( (value == GATT_CFG_NO_OPERATION) ? 
                      THERMOMETER_TEMP_IND_DISABLED :
                      THERMOMETER_TEMP_IND_ENABLED );
       }
@@ -358,7 +352,7 @@ static bStatus_t writeAttrCB( uint16 connHandle, gattAttribute_t *pAttr,
       }
       
       //validate range
-      if ((*pValue >= thermoIRange.high) | ((*pValue <= thermoIRange.low) & (*pValue != 0)))
+      if ((*pValue > thermoIRange.high) || ((*pValue < thermoIRange.low) & (*pValue != 0)))
       {
         status = ATT_ERR_INVALID_VALUE;
       }
@@ -371,7 +365,7 @@ static bStatus_t writeAttrCB( uint16 connHandle, gattAttribute_t *pAttr,
         VOID osal_memcpy( pCurValue, pValue, 2 ) ;
         
         //notify application of write
-        (appCBs->pfnThermometerServiceCB)(THERMOMETER_INTERVAL_SET);
+        (appCBs->pfnThermoServCB)(THERMOMETER_INTERVAL_SET);
         
       }
       break;

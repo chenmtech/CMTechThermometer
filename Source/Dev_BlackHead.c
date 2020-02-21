@@ -1,6 +1,4 @@
 
-
-
 #include "hal_adc.h"
 #include "Dev_BlackHead.h"
 

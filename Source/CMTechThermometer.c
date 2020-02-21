@@ -5,7 +5,6 @@
 #include "osal_snv.h"
 
 #include "OnBoard.h"
-//#include "hal_adc.h"
 #include "hal_key.h"
 #include "gatt.h"
 #include "hci.h"
@@ -22,7 +21,6 @@
 
 #include "gapbondmgr.h"
 #include "App_Thermometer.h"
-//#include "App_DataProcessor.h"
 #include "CMTechThermometer.h"
 
 #if defined FEATURE_OAD
@@ -35,19 +33,19 @@
 // two work modes
 #define MODE_ACTIVE         0x00             // active mode
 #define MODE_STANDBY        0x01             // standby mode
-
+// temperature measurement status
 #define STATUS_MEAS_START   0x00
 #define STATUS_MEAS_STOP    0x01
 
 /* Ative delay: 125 cycles ~1 msec */
 #define ST_HAL_DELAY(n) st( { volatile uint32 i; for (i=0; i<(n); i++) { }; } )
 
-#define DEFAULT_MEAS_INTERVAL 2
+#define DEFAULT_MEAS_INTERVAL 2 // unit: second
 
-static uint8 mode = MODE_STANDBY; // current mode
-static uint8 status = STATUS_MEAS_STOP;
+static uint8 mode = MODE_ACTIVE; // current mode
+static uint8 status = STATUS_MEAS_STOP; // measurement stop
 static uint16 thermoInterval = DEFAULT_MEAS_INTERVAL; // temperature measurement interval, uint: second
-static attHandleValueInd_t tempInd;
+static attHandleValueInd_t tempInd; // temperature indication struct
 
 // advertise data
 static uint8 advertData[] = 
@@ -66,12 +64,13 @@ static uint8 advertData[] =
 // scan response data
 static uint8 scanResponseData[] =
 {
-  0x06,   // length of this data
+  0x07,   // length of this data
   GAP_ADTYPE_LOCAL_NAME_SHORT,   
   'C',
   'M',
   '_',
   'T',
+  'M',
   'M'
 };
 
@@ -101,17 +100,17 @@ static gapBondCBs_t bondMgrCBs =
   NULL                      // Pairing / Bonding state Callback (not used by application)
 };
 
-static thermometerServiceCBs_t thermoServCBs =
+static thermoServCBs_t thermoServCBs =
 {
   thermoServCB    // Charactersitic value change callback
 };
 
 static void switchToActiveMode( void ); // switch from standby mode to active mode
 static void switchToStandbyMode( void );// switch from active mode to standby mode
-static void notifyTemperature(float temp); // read and process thermo-related data
+static void notifyTemperature(float temp); // notify the temperature
 static void initIOPin(); // initialize the I/O pins
-static void startTempMeas( void );
-static void stopTempMeas( void );
+static void startTempMeas( void ); // start the measure
+static void stopTempMeas( void ); // stop the measure
 
 
 extern void CMTechThermometer_Init( uint8 task_id )
@@ -130,7 +129,7 @@ extern void CMTechThermometer_Init( uint8 task_id )
     GAP_SetParamValue( TGAP_GEN_DISC_ADV_MIN, 0 ); // advertising forever
     
     // disable advertising
-    uint8 advertising = FALSE;
+    uint8 advertising = TRUE;
     GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );
     
     // set the pause time from the connection and the update of the connection parameters
@@ -174,14 +173,9 @@ extern void CMTechThermometer_Init( uint8 task_id )
   DevInfo_AddService();                           // Device Information Service
   Thermometer_AddService( GATT_ALL_SERVICES );
   
-#if defined FEATURE_OAD
-  VOID OADTarget_AddService();                    // OAD Profile
-#endif
-  
   Thermometer_RegisterAppCBs( &thermoServCBs );
   
   // set temp measurement interval
-  thermoInterval = 1;
   Thermometer_SetParameter( THERMOMETER_INTERVAL, sizeof(uint16), &thermoInterval ); 
   
   // Register for all key events - This app will handle all key events
@@ -199,6 +193,7 @@ extern void CMTechThermometer_Init( uint8 task_id )
   }
 
   Thermo_Init();
+  Thermo_HardwareOn();
 
   HCI_EXT_ClkDivOnHaltCmd( HCI_EXT_ENABLE_CLK_DIVIDE_ON_HALT );  
 
@@ -230,7 +225,6 @@ static void initIOPin()
   I2CIO = 0x00;
 }
 
-
 extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
 {
 
@@ -259,16 +253,14 @@ extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
 
     // Start Bond Manager
     VOID GAPBondMgr_Register( &bondMgrCBs );
-    
-    switchToActiveMode();
 
     return ( events ^ TH_START_DEVICE_EVT );
   }
   
-  if ( events & TH_MEAS_PERIODIC_EVT )
+  if ( events & TH_PERIODIC_MEAS_EVT )
   {
     if(status == STATUS_MEAS_START) {
-      osal_start_timerEx( taskID, TH_MEAS_PERIODIC_EVT, thermoInterval*1000L );
+      osal_start_timerEx( taskID, TH_PERIODIC_MEAS_EVT, thermoInterval*1000L );
       
       // get value
       uint16 value = Thermo_GetValue();  
@@ -276,7 +268,7 @@ extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
       {
         // update max value
         Thermo_UpdateMaxValue(value);          
-        // show data
+        // show data on the LCD
         Thermo_ShowValueOnLCD(1, value);
         
         if(gapRoleState == GAPROLE_CONNECTED) {
@@ -286,7 +278,7 @@ extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
       }
     }
 
-    return (events ^ TH_MEAS_PERIODIC_EVT);
+    return (events ^ TH_PERIODIC_MEAS_EVT);
   } 
   
   // switch work mode
@@ -304,12 +296,12 @@ extern uint16 CMTechThermometer_ProcessEvent( uint8 task_id, uint16 events )
     return (events ^ TH_SWITCH_MODE_EVT);
   }  
   
-  // do calibration
-  if ( events & TH_DO_CALIBRATION_EVT )
+  // do calibration experiment
+  if ( events & TH_DO_CALI_EXP_EVT )
   {
-    Thermo_DoCalibration();
+    Thermo_DoCaliExperiment();
 
-    return (events ^ TH_DO_CALIBRATION_EVT);
+    return (events ^ TH_DO_CALI_EXP_EVT);
   } 
   
   // Discard unknown events
@@ -337,7 +329,6 @@ static void handleKeys( uint8 shift, uint8 keys )
   if ( keys & HAL_KEY_SW_1 )
   {
     osal_set_event( taskID, TH_SWITCH_MODE_EVT);
-
   } 
 }
 
@@ -414,34 +405,32 @@ static void switchToActiveMode( void )
 
 static void switchToStandbyMode( void )
 { 
+  // stop temp measure
+  stopTempMeas();
+  
   mode = MODE_STANDBY;
   
-  osal_stop_timerEx( taskID, TH_MEAS_PERIODIC_EVT);
-  status = STATUS_MEAS_STOP;
-  
-  // ÖÕÖ¹À¶ÑÀÁ¬½Ó
+  // terminate the bluetooth connection
   if ( gapRoleState == GAPROLE_CONNECTED )
   {
     GAPRole_TerminateConnection( );
   }
-  
-  // Í£Ö¹¹ã²¥
+  // stop advertising
   uint8 advertising = FALSE;
   GAPRole_SetParameter( GAPROLE_ADVERT_ENABLED, sizeof( uint8 ), &advertising );    
   
-  // ¹ØÓ²¼þ
+  // turn of the hardware
   Thermo_HardwareOff();
   
   initIOPin();
 }
-
 
 static void notifyTemperature(float temp)
 {
   // notify temp
   uint8* p = tempInd.value;
   uint8* pTemp = (uint8*)&temp;
-  *p++ = 0x00;
+  *p++ = 0x00; // flag
   *p++ = *(pTemp+3);
   *p++ = *(pTemp+2);
   *p++ = *(pTemp+1);
@@ -455,7 +444,7 @@ static void startTempMeas( void )
 {  
   if(status == STATUS_MEAS_STOP) {
     status = STATUS_MEAS_START;
-    osal_start_timerEx( taskID, TH_MEAS_PERIODIC_EVT, thermoInterval*1000L);
+    osal_start_timerEx( taskID, TH_PERIODIC_MEAS_EVT, thermoInterval*1000L);
   }
 }
 
@@ -463,5 +452,5 @@ static void startTempMeas( void )
 static void stopTempMeas( void )
 {  
   status = STATUS_MEAS_STOP;
-  osal_stop_timerEx( taskID, TH_MEAS_PERIODIC_EVT ); 
+  osal_stop_timerEx( taskID, TH_PERIODIC_MEAS_EVT ); 
 }

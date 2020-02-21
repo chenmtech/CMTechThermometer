@@ -6380,34 +6380,16 @@
       <name>$PROJ_DIR$\..\Source\CMTechThermometer_Main.c</name>
     </file>
     <file>
-      <name>$PROJ_DIR$\..\Source\CMUtil.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\CMUtil.h</name>
-    </file>
-    <file>
       <name>$PROJ_DIR$\..\Source\Dev_ADS1100.c</name>
     </file>
     <file>
       <name>$PROJ_DIR$\..\Source\Dev_ADS1100.h</name>
     </file>
     <file>
-      <name>$PROJ_DIR$\..\Source\Dev_BlackHead.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\Dev_BlackHead.h</name>
-    </file>
-    <file>
       <name>$PROJ_DIR$\..\Source\Dev_HT1621B.c</name>
     </file>
     <file>
       <name>$PROJ_DIR$\..\Source\Dev_HT1621B.h</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\Dev_LMT70.c</name>
-    </file>
-    <file>
-      <name>$PROJ_DIR$\..\Source\Dev_LMT70.h</name>
     </file>
     <file>
       <name>$PROJ_DIR$\..\Source\OSAL_CMTechThermometer.c</name>

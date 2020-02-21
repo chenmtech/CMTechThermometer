@@ -6,24 +6,25 @@
 #include "App_Thermometer.h"
 
 // NVID
-#define BLE_NVID_CALI_VALUE 0x80      // the NVID of the calibration value
-#define BLE_NVID_VALUE_TYPE 0x81      // the NVID of the value type, 1:AD,2:Resistor,3:Temperature
-#define BLE_NVID_MAX_VALUE  0x82      // the NVID of the last max value
+#define NVID_CALI_VALUE 0x80      // the NVID of the "caliValue"
+#define NVID_VALUE_TYPE 0x81      // the NVID of the value type, 1:AD 2:Resistor 3:Temperature
+#define NVID_MAX_VALUE  0x82      // the NVID of the last max value
 
 /**
-// 37度的时候的AD值，用于标定。
- * 标定方法是一个新的设备将感测温度调到37度，得到其输出AD值
+ * 37度的时候的AD值，用于标定。
+ * 标定方法是使一个新的设备感测37度温度，得到其输出AD值
  * 然后和ADVALUE37比较，得到这个新设备的caliValue，并保存到NV中
  * 这样初始化的时候读出caliValue,每次得到一个输出AD值，都减去caliValue，就可以完成标定
 */
 #define ADVALUE37   17261   
 
-// 目前板1（都焊接了的板）的标定值为0（上面的数据表是根据板1制作的）
-// 板2的标定值为14（即板2的输出值比板1要大14）
-static int16  caliValue = 0;    // 由于ADS1100的Offset Error引起测量误差，需要进行标定，这个是标定值
-
-// 目前两块板的高精度参考电阻都是33009Ohm
-//static uint16 RREF = 33009;   // 高精度参考电阻，单位Ohm
+/**
+ * 由于ADS1100的Offset Error引起测量误差，需要进行标定，这个是标定值
+ * 目前板1（都焊接了的板）的标定值为0（下面的数据表是根据板1制作的）
+ * 板2的标定值为14（即板2的输出值比板1要大14）
+ * 这个值会保存到NV中，每次启动时会从NV读出它
+*/
+static int16  caliValue = 0;    
 
 //////////////////下面为华巨NTC小黑头的参数
 //从33摄氏度-44摄氏度，0.1摄氏度为间隔
@@ -68,9 +69,10 @@ static const uint16 RTable[] =
 };
 
 //相应电阻下的AD输出值，由实验得到
+// 33.0-33.9之间的数据不是实验结果，只是估算的，因为当时没有做33-34的数据
 static const uint16 ADTable[] = 
 {
-  15907,15941,15975,16009,16043,16077,16111,16145,16179,16213,      //33摄氏度，这组数据不是实验结果，当时没有做33-34的数据
+  15907,15941,15975,16009,16043,16077,16111,16145,16179,16213,      //33摄氏度
   16247,16281,16316,16349,16384,16419,16452,16486,16520,16554,      //34摄氏度
   16588,16605,16621,16639,16655,16671,16689,16706,16723,16740,      //35.00-35.45摄氏度
   16756,16773,16789,16807,16824,16840,16857,16874,16891,16907,      //35.50-35.95摄氏度
@@ -92,43 +94,35 @@ static uint8 idx = 0; // data index in the table
 static uint8 valueType = THERMOMETER_CFG_VALUETYPE_T;  // value type
 static uint16 valueLowLimit = LOWLIMIT_T; // low limit of value
 static uint16 valueUpLimit = UPLIMIT_T; // up limit of value
-static uint16 lastMaxValue = 0; // last max value
 static uint16 maxValue = 0; // max value measured in this time
-static uint16 curValue = 32768;   // current value measured. 32768 which is a value that can't reached.
+static uint16 curValue = 65535;   // current value measured. 65535 which is a value that can't reached.
 
-// 由AD输出值查表计算电阻值
+// 目前两块板的高精度参考电阻都是33009Ohm
+//static uint16 RREF = 33009;   // 高精度参考电阻，单位Ohm
+
+// calculate R from AD
 static uint16 calcRFromADValue(uint16 ADValue);
-
-// 由AD输出值查表计算温度值
+// calculate T from AD
 static uint16 calcTFromADValue(uint16 ADValue);
-
-// 保存本次测量的最大值到NV
-static void saveMaxValueToNV();
-
-// 从NV读取上次测量的最大值
-static void readLastMaxValueFromNV();
-
-// 获取AD值
-static uint16 getADValue();
-
-// 获取温度值
+// read the last max value from NV
+static uint16 readLastMaxValueFromNV();
+// get calibrated AD value
+static uint16 getCaliADValue();
+// get T
 static uint16 getTemperature();
-
-// 获取电阻值
+// get R
 static uint16 getResistor();
 
 
 // initialize the model
 extern void Thermo_Init()
 {
-  // 初始化HT1621至低功耗状态
+  // initialize the HT1621 to power down state
   HT1621B_InitToPowerDown();  
-  
-  // 初始化AD
+  // initialize the ADS1100
   ADS1100_Init();    
-  
-  // 从NV读取标定值，并设置
-  uint8 rtn = osal_snv_read(BLE_NVID_CALI_VALUE, sizeof(int16), (uint8*)&caliValue);
+  // read the caliValue from NV
+  uint8 rtn = osal_snv_read(NVID_CALI_VALUE, sizeof(int16), (uint8*)&caliValue);
   if(rtn != SUCCESS)
     caliValue = 0;    
 }
@@ -136,73 +130,33 @@ extern void Thermo_Init()
 // save the max value and then turn off the hardware, including the LCD and ADC
 extern void Thermo_HardwareOff()
 {  
-  // 保存最大值到NV
-  saveMaxValueToNV();  
-  
-  // 清屏LCD
+  // save valueType and max value into NV
+  osal_snv_write(NVID_VALUE_TYPE, sizeof(uint8), (uint8*)&valueType);
+  osal_snv_write(NVID_MAX_VALUE, sizeof(uint16), (uint8*)&maxValue); 
+  // clear the LCD
   HT1621B_ClearLCD();    
-  // 关LCD
+  // close the LCD
   HT1621B_TurnOffLCD();    
-
-  // 关AD
+  // close the AD
   ADS1100_TurnOff(); 
 }
-
 
 // turn on the hardware, including the LCD and ADC, and then read the last max value and show it.
 extern void Thermo_HardwareOn()
 {
-  // 从NV读取上次最高温度值，并设置
-  readLastMaxValueFromNV();
-  
-  maxValue = 0;  
-  
-  curValue = 32768;
-
-  // 开LCD
+  // turn on the LCD
   HT1621B_TurnOnLCD();  
-  // 清屏LCD
+  // clear the LCD
   HT1621B_ClearLCD();   
-  
-  // 开AD
+  // turn on the AD
   ADS1100_TurnOn();  
+  // read the last max value from NV
+  uint16 lastMaxValue = readLastMaxValueFromNV();
+  //show the last max value on the LCD
+  Thermo_ShowValueOnLCD(1, lastMaxValue); 
   
-  //显示上次最大值
-  Thermo_ShowValueOnLCD(1, lastMaxValue);  
-}
-
-// get value type
-extern uint8 Thermo_GetValueType()
-{
-  return valueType;
-}
-
-// set value type
-extern void Thermo_SetValueType(uint8 type)
-{
-  if(valueType == type) return;
-  
-  switch(type)
-  {
-  case THERMOMETER_CFG_VALUETYPE_AD:
-    valueLowLimit = LOWLIMIT_AD;
-    valueUpLimit = UPLIMIT_AD;
-    break;
-  case THERMOMETER_CFG_VALUETYPE_R:
-    valueLowLimit = LOWLIMIT_R;
-    valueUpLimit = UPLIMIT_R;
-    break;
-  case THERMOMETER_CFG_VALUETYPE_T:
-    valueLowLimit = LOWLIMIT_T;
-    valueUpLimit = UPLIMIT_T;
-    break;
-  default:
-    return;
-  }   
-  valueType = type;
   maxValue = 0;  
-  curValue = 32768;
-  HT1621B_ClearLCD();
+  curValue = 65535; 
 }
 
 // get value which can be AD, R or T value according to the value type
@@ -211,7 +165,7 @@ extern uint16 Thermo_GetValue()
   switch(valueType)
   {
   case THERMOMETER_CFG_VALUETYPE_AD:
-    return getADValue();
+    return getCaliADValue();
   case THERMOMETER_CFG_VALUETYPE_R:
     return getResistor();
   case THERMOMETER_CFG_VALUETYPE_T:
@@ -220,8 +174,8 @@ extern uint16 Thermo_GetValue()
   return FAILURE;
 }
 
-// do calibration for a new device in order to get its caliValue
-extern void Thermo_DoCalibration()
+// do calibration experiment for a new device in order to get its caliValue
+extern void Thermo_DoCaliExperiment()
 {
   uint16 sum = 0;
   uint16 data = 0;
@@ -235,25 +189,24 @@ extern void Thermo_DoCalibration()
   // 取37度时的三次AD输出平均值，与标准的37度输出值进行比较，得到标定误差值
   caliValue = (int16)((double)sum/3 - ADVALUE37 + 0.5);  // 四舍五入
   
-  // 将标定值保存在NV中
-  osal_snv_write(BLE_NVID_CALI_VALUE, sizeof(int16), (uint8*)&caliValue);
+  // save the "caliValue" into NV
+  osal_snv_write(NVID_CALI_VALUE, sizeof(int16), (uint8*)&caliValue);
 }
 
-// 更新最大值
+// update the maxValue
 extern uint16 Thermo_UpdateMaxValue(uint16 value)
 {
   if(maxValue < value) maxValue = value;
   return maxValue;
 }
 
-// 在LCD上显示一个值
+// show a value on the LCD
 extern void Thermo_ShowValueOnLCD(uint8 location, uint16 value)
 { 
-  // 如果值与当前值相同，就不显示了。
+  // if the value is equal to the curValue, return.
   if( curValue == value ) return;
   
   curValue = value;
-  
   if(value <= valueLowLimit)    //显示"L"
   {
     HT1621B_ShowL(location);
@@ -266,79 +219,59 @@ extern void Thermo_ShowValueOnLCD(uint8 location, uint16 value)
   }    
   else
   {
-    // 显示温度数据
+    // show Temperature
     if(valueType == THERMOMETER_CFG_VALUETYPE_T)
     {
       HT1621B_ShowTemperature(location, value, FALSE);
     }
-    else  // 显示其他类型数据
+    else  // show other value with non-temperature type
       HT1621B_ShowUint16Data(location, value);  
   }
 }
 
-// 开LCD
-extern void Thermo_LCDOn()
+// get calibrated AD value
+static uint16 getCaliADValue()
 {
-  HT1621B_TurnOnLCD();
-  HT1621B_ClearLCD();
-}
-
-// 关LCD
-extern void Thermo_LCDOff()
-{
-  HT1621B_TurnOffLCD();
-}
-
-// 开蜂鸣器
-extern void Thermo_ToneOn()
-{
-  HT1621B_ToneOn();
-}
-
-// 关蜂鸣器
-extern void Thermo_ToneOff()
-{
-  HT1621B_ToneOff(); 
-}
-
-// 获取AD值
-static uint16 getADValue()
-{
-  // 获取AD值
+  // get AD value
   uint16 ADValue = 0;
   if(ADS1100_GetADValue(&ADValue) == FAILURE) return FAILURE;
   
-  // 减去标定值误差
+  // calibrate AD value
   return (uint16)((double)ADValue - caliValue);  
 }
 
-// 获取温度值
+// get Temperature value
 static uint16 getTemperature()
 {
-  uint16 ADValue = getADValue();
+  uint16 ADValue = getCaliADValue();
   if(ADValue == FAILURE) return FAILURE;
   
   return calcTFromADValue(ADValue);
 }
 
-// 获取电阻值
+// get R
 static uint16 getResistor()
 {
-  uint16 ADValue = getADValue();
+  uint16 ADValue = getCaliADValue();
   if(ADValue == FAILURE) return FAILURE;
   
   return calcRFromADValue(ADValue);
 }
 
-// 从NV读取上次测量的最大值
-static void readLastMaxValueFromNV()
+static uint16 readLastMaxValueFromNV()
 {
-  // 从NV读取上次数据类型
-  uint8 rtn = osal_snv_read(BLE_NVID_VALUE_TYPE, sizeof(uint8), (uint8*)&valueType);
+  // read valueType from NV
+  uint8 rtn = osal_snv_read(NVID_VALUE_TYPE, sizeof(uint8), (uint8*)&valueType);
   if(rtn != SUCCESS)
     valueType = THERMOMETER_CFG_VALUETYPE_T;    
   
-  // 设置数据类型的上下限
+  // read the last max value from NV
+  uint16 lastMaxValue = 0;
+  rtn = osal_snv_read(NVID_MAX_VALUE, sizeof(uint16), (uint8*)&lastMaxValue);
+  if(rtn != SUCCESS)
+    lastMaxValue = 0;   
+  
+  // set the value limit
   switch(valueType)
   {
   case THERMOMETER_CFG_VALUETYPE_AD:
@@ -354,19 +287,7 @@ static void readLastMaxValueFromNV()
     valueUpLimit = UPLIMIT_T;
     break;
   }
-  
-  // 从NV读取上次最大值，并设置
-  rtn = osal_snv_read(BLE_NVID_MAX_VALUE, sizeof(uint16), (uint8*)&lastMaxValue);
-  if(rtn != SUCCESS)
-    lastMaxValue = 0;    
-}
-
-
-// 保存最大值和数据类型到NV
-static void saveMaxValueToNV()
-{
-  osal_snv_write(BLE_NVID_VALUE_TYPE, sizeof(uint8), (uint8*)&valueType);
-  osal_snv_write(BLE_NVID_MAX_VALUE, sizeof(uint16), (uint8*)&maxValue);
+  return lastMaxValue;
 }
 
 // 由AD输出值计算电阻值
