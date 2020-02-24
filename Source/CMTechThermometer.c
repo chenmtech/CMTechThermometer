@@ -431,10 +431,10 @@ static void notifyTemperature(float temp)
   uint8* p = tempInd.value;
   uint8* pTemp = (uint8*)&temp;
   *p++ = 0x00; // flag
-  *p++ = *(pTemp+3);
-  *p++ = *(pTemp+2);
-  *p++ = *(pTemp+1);
-  *p++ = *pTemp;
+  *p++ = *pTemp++;
+  *p++ = *pTemp++;
+  *p++ = *pTemp++;
+  *p++ = *pTemp++;
   tempInd.len = 5;
   Thermometer_TempIndicate( gapConnHandle, &tempInd, taskID );
 }
